@@ -16,6 +16,8 @@ interface SplashCursorProps {
     COLOR_UPDATE_SPEED?: number;
     BACK_COLOR?: { r: number; g: number; b: number };
     TRANSPARENT?: boolean;
+    VISUAL_INTENSITY?: number;
+    CURSOR_STRENGTH?: number;
 }
 
 function SplashCursor({
@@ -32,7 +34,9 @@ function SplashCursor({
     SHADING = true,
     COLOR_UPDATE_SPEED = 10,
     BACK_COLOR = { r: 0.5, g: 0, b: 0 },
-    TRANSPARENT = true
+    TRANSPARENT = true,
+    VISUAL_INTENSITY = 0.5,
+    CURSOR_STRENGTH = 1.0
 }: SplashCursorProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationFrameId = useRef<number | null>(null);
@@ -72,7 +76,9 @@ function SplashCursor({
             COLOR_UPDATE_SPEED,
             PAUSED: false,
             BACK_COLOR,
-            TRANSPARENT
+            TRANSPARENT,
+            VISUAL_INTENSITY,
+            CURSOR_STRENGTH
         };
 
         let pointers = [new (pointerPrototype as any)()];
@@ -317,7 +323,9 @@ function SplashCursor({
       uniform sampler2D uDithering;
       uniform vec2 ditherScale;
       uniform vec2 texelSize;
-
+      uniform float uVisualIntensity;
+      uniform float uCursorStrength;
+      
       vec3 linearToGamma (vec3 color) {
           color = max(color, vec3(0));
           return max(1.055 * pow(color, vec3(0.416666667)) - 0.055, vec3(0));
@@ -341,7 +349,22 @@ function SplashCursor({
               c *= diffuse;
           #endif
 
+          // Visual Tuning
+          c *= uCursorStrength;
+          
+          // Soft Highlight Rolloff
+          float luma = dot(c, vec3(0.299, 0.587, 0.114));
+          float rolloff = smoothstep(0.7, 1.0, luma);
+          c = mix(c, c * 0.85, rolloff);
+          
+          c = min(c, 0.9); // Soft clamp to avoid solid whites
+          
           float a = max(c.r, max(c.g, c.b));
+          a *= uVisualIntensity; // Global intensity scaling
+          
+          // Increase transparency at high density to keep text readable
+          a = clamp(a, 0.0, 0.8); 
+
           gl_FragColor = vec4(c, a);
       }
     `;
@@ -832,6 +855,8 @@ function SplashCursor({
             let height = target == null ? gl.drawingBufferHeight : target.height;
             displayMaterial.bind();
             if (config.SHADING) gl.uniform2f(displayMaterial.uniforms.texelSize, 1.0 / width, 1.0 / height);
+            gl.uniform1f(displayMaterial.uniforms.uVisualIntensity, config.VISUAL_INTENSITY);
+            gl.uniform1f(displayMaterial.uniforms.uCursorStrength, config.CURSOR_STRENGTH);
             gl.uniform1i(displayMaterial.uniforms.uTexture, dye.read.attach(0));
             blit(target);
         }
